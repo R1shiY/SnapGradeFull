@@ -8,6 +8,7 @@ import { NavLink } from 'react-router-dom'
 import { useState } from 'react'
 import { extractTextAndImages } from '../utils/ocr'
 import { gradeAssignment, GradingResult } from '../utils/grading'
+import { exportBatchResultsToExcel, computeClassMetrics } from '../utils/export'
 
 export function BatchGrader() {
   const [assignments, setAssignments] = useState<File[]>([])
@@ -16,6 +17,7 @@ export function BatchGrader() {
   const [loading, setLoading] = useState(false)
   const [results, setResults] = useState<Array<GradingResult & { name: string }>>([])
   const [expanded, setExpanded] = useState<Record<number, boolean>>({})
+  const [rubricText, setRubricText] = useState<string>('') // capture rubric for export
 
   const toggle = (idx: number) => setExpanded(prev => ({ ...prev, [idx]: !prev[idx] }))
 
@@ -58,6 +60,7 @@ export function BatchGrader() {
                 setLoading(true)
                 setResults([])
                 const rubric = rubricFiles.length ? await extractTextAndImages(rubricFiles) : { text: '', images: [] }
+                setRubricText(rubric.text)
                 const out: Array<GradingResult & { name: string }> = []
                 for (let i = 0; i < assignments.length; i++) {
                   const file = assignments[i]
@@ -72,7 +75,6 @@ export function BatchGrader() {
                     ...graded,
                     name: graded.studentName || file.name.replace(/\.\w+$/, ''),
                   })
-                  
                   // Add delay between requests to avoid rate limits
                   if (i < assignments.length - 1) {
                     await new Promise(resolve => setTimeout(resolve, 2000))
@@ -97,6 +99,38 @@ export function BatchGrader() {
 
           {results.length > 0 && (
             <div className="space-y-4 pt-4 border-t border-slate-100">
+              {/* Class metrics summary */}
+              {(() => {
+                const metrics = computeClassMetrics(results)
+                return (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="rounded-lg bg-sky-50/60 border border-sky-100 p-3">
+                      <div className="text-xs text-slate-600">Class Average</div>
+                      <div className="text-sm font-medium">{metrics.averagePercent}</div>
+                      <div className="mt-1 text-xs text-slate-600">Median: {metrics.medianPercent}</div>
+                    </div>
+                    <div className="rounded-lg bg-white border border-slate-200 p-3">
+                      <div className="text-xs text-slate-600">Distribution</div>
+                      <div className="mt-1 text-sm">
+                        Correct: <span className="font-semibold">{metrics.distribution.correct}</span> •
+                        Partial: <span className="font-semibold">{metrics.distribution.partial}</span> •
+                        Incorrect: <span className="font-semibold">{metrics.distribution.incorrect}</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })()}
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-slate-600">
+                  {results.length} student(s) graded
+                </div>
+                <Button
+                  variant="secondary"
+                  onClick={() => exportBatchResultsToExcel(results, rubricText, customRules)}
+                >
+                  Export to Excel
+                </Button>
+              </div>
               {results.map((stu, idx) => {
                 const isOpen = !!expanded[idx]
                 return (
