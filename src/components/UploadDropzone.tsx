@@ -13,20 +13,34 @@ type Props = {
   description?: string
   accept?: string
   multiple?: boolean
+  onFilesChange?: (files: File[]) => void
 }
 
-export function UploadDropzone({ title, description, accept, multiple }: Props) {
+export function UploadDropzone({ title, description, accept, multiple, onFilesChange }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null)
-  const [files, setFiles] = useState<FileItem[]>([])
+  const [files, setFiles] = useState<File[]>([])
 
   const trigger = () => inputRef.current?.click()
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const list = e.target.files
     if (!list) return
-    const items: FileItem[] = Array.from(list).map(f => ({ name: f.name, size: f.size, type: f.type }))
-    setFiles(prev => multiple ? [...prev, ...items] : items)
+    const items: File[] = Array.from(list)
+
+    if (multiple) {
+      setFiles(prev => {
+        const next = [...prev, ...items]
+        onFilesChange?.(next)
+        return next
+      })
+    } else {
+      setFiles(items)
+      onFilesChange?.(items)
+    }
   }
-  const clear = () => setFiles([])
+  const clear = () => {
+    setFiles([])
+    onFilesChange?.([])
+  }
 
   return (
     <div className="border-2 border-dashed border-sky-200 rounded-xl bg-sky-50/40 p-6">

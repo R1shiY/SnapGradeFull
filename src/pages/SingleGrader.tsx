@@ -4,20 +4,17 @@ import { TextArea } from '../components/TextArea'
 import { Button } from '../components/Button'
 import { Gauge, CheckCircle2, ListOrdered, User, FileCode, AlertCircle } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
-import { useState } from 'react'
+import { useState, ChangeEvent } from 'react'
+import { extractTextAndImages } from '../utils/ocr'
+import { gradeAssignment, GradingResult } from '../utils/grading'
 
 export function SingleGrader() {
-  const [result, setResult] = useState<null | {
-    studentName: string
-    total: string
-    breakdown: {
-      label: string
-      points: string
-      expected: string
-      student: string
-      feedback: string
-    }[]
-  }>(null)
+  const [result, setResult] = useState<GradingResult | null>(null)
+  const [assignmentFiles, setAssignmentFiles] = useState<File[]>([])
+  const [rubricFiles, setRubricFiles] = useState<File[]>([])
+  const [customRules, setCustomRules] = useState<string>('')
+  const [loading, setLoading] = useState(false)
+  const onCustomRulesChange = (e: ChangeEvent<HTMLTextAreaElement>) => setCustomRules(e.target.value)
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       {/* Assignment */}
@@ -27,6 +24,7 @@ export function SingleGrader() {
           description="Drag & drop pages or upload multiple images/PDF files."
           accept=".pdf,image/*"
           multiple
+          onFilesChange={setAssignmentFiles}
         />
       </Card>
       {/* Rubric */}
@@ -36,72 +34,58 @@ export function SingleGrader() {
           description="Drag & drop rubric files (PDF/images) or keep empty to use defaults."
           accept=".pdf,image/*"
           multiple={false}
+          onFilesChange={setRubricFiles}
         />
         <div className="mt-4">
-          <TextArea
-            label="Optional: Custom Rules"
-            placeholder="Add specific scoring rules or constraints to override defaults..."
+          {/* wire the TextArea to state */}
+          <textarea
             rows={5}
+            placeholder="Add specific scoring rules or constraints to override defaults..."
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-sky-200"
+            onChange={onCustomRulesChange}
           />
         </div>
       </Card>
       {/* Grade */}
-      <Card title="Grade" subtitle="Mock output for demo">
+      <Card title="Grade" subtitle="Runs OCR + Gemini grading">
         <div className="space-y-3">
           <Button
             className="w-full"
-            onClick={() =>
-              setResult({
-                studentName: 'Jane Doe',
-                total: '43 / 50',
-                breakdown: [
-                  {
-                    label: 'Q1: Linear Equations (solve for x)',
-                    points: '8 / 10',
-                    expected: '3x + 5 = 20 → 3x = 15 → x = 5',
-                    student: '3x + 5 = 20 → x = 15',
-                    feedback: 'Missed dividing by 3 in the final step.'
-                  },
-                  {
-                    label: 'Q2: Quadratic Roots (factoring)',
-                    points: '10 / 10',
-                    expected: 'x^2 - 5x + 6 = (x - 2)(x - 3) → x = 2, 3',
-                    student: '(x - 2)(x - 3) → x = 2, 3',
-                    feedback: 'Correct.'
-                  },
-                  {
-                    label: 'Q3: Derivative (product rule)',
-                    points: '7 / 10',
-                    expected: "d/dx [x·e^x] = e^x + x·e^x = e^x(1 + x)",
-                    student: 'e^x + x·e^x',
-                    feedback: 'Correct derivative; no simplification. Minor deduction.'
-                  },
-                  {
-                    label: 'Q4: Definite Integral (u-substitution)',
-                    points: '9 / 10',
-                    expected: '∫ 2x·cos(x^2) dx; let u = x^2 → du = 2x dx → ∫ cos(u) du = sin(u) + C → sin(x^2)',
-                    student: 'sin(x^2)',
-                    feedback: 'Correct; explanation concise. Minor deduction for missing +C in general form.'
-                  },
-                  {
-                    label: 'Q5: Word Problem (rate/mixture)',
-                    points: '9 / 10',
-                    expected: 'Set up equations for rate mix, solve system to find target ratio; final: 3 liters added.',
-                    student: '3 liters added',
-                    feedback: 'Answer correct; partial work shown.'
-                  }
-                ]
-              })
-            }
+            disabled={loading || assignmentFiles.length === 0}
+            onClick={async () => {
+              try {
+                setLoading(true)
+                setResult(null)
+                const assign = await extractTextAndImages(assignmentFiles)
+                const rubric = rubricFiles.length ? await extractTextAndImages(rubricFiles) : { text: '', images: [] }
+                const graded = await gradeAssignment({
+                  assignmentText: assign.text,
+                  rubricText: rubric.text,
+                  customRules,
+                  images: assign.images.length ? assign.images : undefined,
+                })
+                // fill student name from OCR text if missing
+                if (!graded.studentName) {
+                  const name = graded.studentName ?? ''
+                  graded.studentName = name || undefined
+                }
+                setResult(graded)
+              } catch (e) {
+                console.error(e)
+                alert('Grading failed: ' + (e as Error).message)
+              } finally {
+                setLoading(false)
+              }
+            }}
           >
-            <Gauge size={16} /> Grade Assignment
+            {loading ? <Gauge size={16} /> : <Gauge size={16} />} {loading ? 'Grading...' : 'Grade Assignment'}
           </Button>
           <div className="text-sm">
             <NavLink to="/batch" className="inline-flex items-center gap-2 text-sky-700 hover:underline">
               Switch to Batch Upload
             </NavLink>
           </div>
-          {/* Result view */}
+
           {result && (
             <div className="space-y-4 pt-4 border-t border-slate-100">
               <div className="grid grid-cols-2 gap-3">
@@ -109,7 +93,7 @@ export function SingleGrader() {
                   <div className="text-xs text-slate-600">Student</div>
                   <div className="flex items-center gap-2 mt-1">
                     <User className="text-sky-600" size={16} />
-                    <span className="text-sm font-medium">{result.studentName}</span>
+                    <span className="text-sm font-medium">{result.studentName || 'Unknown'}</span>
                   </div>
                 </div>
                 <div className="rounded-lg bg-sky-50/60 border border-sky-100 p-3">
@@ -120,6 +104,7 @@ export function SingleGrader() {
                   </div>
                 </div>
               </div>
+
               <div className="rounded-lg bg-white border border-slate-200">
                 <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-2 text-slate-700 font-semibold">
                   <ListOrdered size={16} /> Question Breakdown

@@ -15,4 +15,7 @@ yarn-debug.log*
 yarn-error.log*
 
 # editor
-.DS_Store
+.DS_Store.env
+node_modules/
+dist/
+build/
